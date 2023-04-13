@@ -15,8 +15,8 @@ def show_flow(filename):
     flow = read_flow(filename)
     img = flow_to_image(flow)
     plt.imshow(img)
-    plt.savefig('/home/sdastani/projects/rrg-ebrahimi/sdastani/crn/src/visualization/01.png')
-    # plt.show()
+    # plt.savefig('/home/sdastani/projects/rrg-ebrahimi/sdastani/crn/src/visualization/01.png')
+    plt.show()
 
 def read_flow(filename):
     """
@@ -173,12 +173,17 @@ def make_color_wheel():
 
     return colorwheel
 
+img = show_flow('/home/sdastani/projects/rrg-ebrahimi/sdastani/CRN/data/v_BabyCrawling_g03_c03/inference/run.epoch-0-flow-field/000000.flo')
+
+import os
+import PIL.Image
 def mkdir_ifnotexists(dir):
     if os.path.exists(dir):
         return
     os.mkdir(dir)
 
-flo_pth='/home/sdastani/scratch/output/inference/run.epoch-0-flow-field/'
+
+flo_pth='/home/sdastani/projects/rrg-ebrahimi/sdastani/CRN/data/v_BabyCrawling_g03_c03/inference/run.epoch-0-flow-field/'
 flos=[flo_pth + f for f in os.listdir(flo_pth)]
 mkdir_ifnotexists('./FlowFrames')
 for i in range(len(flos)):
