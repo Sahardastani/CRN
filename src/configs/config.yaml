@@ -3,9 +3,9 @@ checkpoint:
 
 parameter:
   sequence_length: 20
-  batch_size: 2
+  batch_size: 5
   input_size: 128
   hidden_size: 256
   num_layers: 2
   num_classes: 3
-  epochs: 10
+  epochs: 1

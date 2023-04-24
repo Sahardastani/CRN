@@ -14,6 +14,7 @@ class FrameDataset(Dataset):
 
 
     def __len__(self):
+        # print('len:', len(self.videos))
         return len(self.videos)
 
     def __getitem__(self, index):
@@ -27,21 +28,4 @@ class FrameDataset(Dataset):
             if self.transform is not None:
                 frame = self.transform(frame)
             video.append(frame)
-        return torch.stack(video[:self.seq_length]), torch.tensor(index)
-
-# # transform
-# transform = transforms.Compose([
-#     transforms.Resize(256),
-#     transforms.CenterCrop(224),
-#     transforms.ToTensor(),
-#     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-# ])
-# # Define the dataloader function
-# def get_dataloader(root_dir, batch_size, sequence_length, transform):
-#     dataset = FrameDataset(root_dir=root_dir, seq_length = sequence_length, transform=transform)
-#     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-#     return dataloader
-# dataloader = get_dataloader('/home/sdastani/projects/rrg-ebrahimi/sdastani/CRN/data', 2, 20, transform)
-
-# for batch_idx, (data, target) in enumerate(dataloader):
-#     breakpoint()
+        return torch.stack(video[:self.seq_length]), self.videos[index].split('_')[1]
