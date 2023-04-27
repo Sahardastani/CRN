@@ -1,34 +1,68 @@
+import os
+import sys 
+import cv2 
 import time 
 import yaml
+import argparse 
+import numpy as np 
+from PIL import Image
+import matplotlib.pyplot as plt
+from kmeans_pytorch import kmeans, kmeans_predict
+
 import torch
 import torch.nn as nn
-import numpy as np 
 import torch.utils.data as data
 from torch.utils.data.sampler import SubsetRandomSampler
 import torchvision.models as models
 from torchvision.transforms import transforms
+from torch.utils.data import Dataset, DataLoader
+import torch.optim as optim
+
 from models.rnn import VideoRNN
 from models.resnet_simclr import ResNetSimCLR
 from models.feature_extractor import FeatureExtractor
-from datasets.ucf101 import FrameDataset
-from torch.utils.data import Dataset, DataLoader
+
+from datasets.ucf101 import VideoDataset
 from __init__ import top_dir, data_dir, configs_dir
-import torch.optim as optim
-import matplotlib.pyplot as plt
-from kmeans_pytorch import kmeans, kmeans_predict
+
+MEAN = torch.tensor((0.485 * 255, 0.456 * 255, 0.406 * 255))
+STD = torch.tensor((0.229 * 255, 0.224 * 255, 0.225 * 255))
 
 # Set config and device
 config = yaml.load(open("./src/configs/config.yaml", "r"), Loader=yaml.FullLoader)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
 
-# transform
 transform = transforms.Compose([
-    transforms.Resize(256),
-    transforms.CenterCrop(224),
-    transforms.ToTensor(),
+    transforms.Resize((224, 224)),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
+
+# Define the dataloader function
+def get_dataloader(root_dir, batch_size, sequence_length, transform):
+
+    # get the dataset
+    dataset = VideoDataset(root_dir='/home/sdastani/scratch/ucf101/UCF101', seq_length = sequence_length, transform=transform)
+    
+    # split the dataset into train and test
+    train_size = int(0.7 * len(dataset))
+    test_size = len(dataset) - train_size
+    train_set, val_set = torch.utils.data.random_split(dataset, [train_size, test_size])
+    
+    # load the dataset
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
+
+    return train_loader, val_loader
+
+# Define dataloader
+train_loader, val_loader = get_dataloader('/home/sdastani/scratch/ucf101/UCF101', 
+                                            config['parameter']['batch_size'], 
+                                            config['parameter']['sequence_length'], 
+                                            transform)
+
+# dataset = VideoDataset('/home/sdastani/scratch/uc', seq_length=10)#, transform=transform)
+# dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)
 
 # load the model from checkpoint
 model = ResNetSimCLR(base_model='resnet18', out_dim=128)
@@ -47,28 +81,6 @@ rnn = VideoRNN(input_size = config['parameter']['input_size'],
 optimizer = optim.Adam(rnn.parameters())
 criterion = nn.CrossEntropyLoss()
 
-# Define the dataloader function
-def get_dataloader(root_dir, batch_size, sequence_length, transform):
-
-    # get the dataset
-    dataset = FrameDataset(root_dir=data_dir(), seq_length = sequence_length, transform=transform)
-    
-    # split the dataset into train and test
-    train_size = int(0.7 * len(dataset))
-    test_size = len(dataset) - train_size
-    train_set, val_set = torch.utils.data.random_split(dataset, [train_size, test_size])
-    
-    # load the dataset
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=True)
-
-    # dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-    return train_loader, val_loader
-    # return dataloader
-
-# Define dataloader
-train_loader, val_loader = get_dataloader(data_dir(), config['parameter']['batch_size'], config['parameter']['sequence_length'], transform)
-
 # train function
 def train(cnn, rnn, dataloader, optimizer, criterion):
     train_loss = 0.
@@ -83,12 +95,30 @@ def train(cnn, rnn, dataloader, optimizer, criterion):
         # Use a list comprehension to replace each element in the tuple with its corresponding integer value
         target = torch.tensor([element_to_int[element] for element in target])
 
-        data, target = data.to(device), target.to(device)
+        btch = []
+        for i, batch in enumerate(data):
+            seqlength = []
+            # print(f'batch {i} is being processed ...')
+            for j in range(batch.shape[0]):
+                cur_frame = data[0][j].permute(1,2,0)
+                pre_frame = data[0][j-1].permute(1,2,0)
+                input1 = torch.from_numpy(np.array((cur_frame - MEAN) / STD).transpose((2, 0, 1))).float().unsqueeze(0).cuda()
+                input2 = torch.from_numpy(np.array((pre_frame - MEAN) / STD).transpose((2, 0, 1))).float().unsqueeze(0).cuda()
+                flownet = FlowModel(args=None, pretrained='/home/sdastani/projects/rrg-ebrahimi/sdastani/flownet2-pytorch/FlowNet2_checkpoint.pth.tar', save_flow=True)
+                flownet.cuda()
+                flow, image, loss = flownet(input1, input2)
+                image = transform(image.float())
+                seqlength.append(image)
+            length = torch.stack(seqlength, dim=0)
+            btch.append(length)
+        final = torch.stack(btch, dim=0)
+
+        final, target = final.to(device), target.to(device)
 
         optimizer.zero_grad()
 
         features = []
-        for frame in data:
+        for frame in final:
             with torch.no_grad():
                 feature = cnn(frame.float())
             features.append(feature)
@@ -123,10 +153,28 @@ def validate(cnn, rnn, dataloader, criterion):
         # Use a list comprehension to replace each element in the tuple with its corresponding integer value
         target = torch.tensor([element_to_int[element] for element in target])
 
-        data, target = data.to(device), target.to(device)
+        btch = []
+        for i, batch in enumerate(data):
+            seqlength = []
+            # print(f'batch {i} is being processed ...')
+            for j in range(batch.shape[0]):
+                cur_frame = data[0][j].permute(1,2,0)
+                pre_frame = data[0][j-1].permute(1,2,0)
+                input1 = torch.from_numpy(np.array((cur_frame - MEAN) / STD).transpose((2, 0, 1))).float().unsqueeze(0).cuda()
+                input2 = torch.from_numpy(np.array((pre_frame - MEAN) / STD).transpose((2, 0, 1))).float().unsqueeze(0).cuda()
+                flownet = FlowModel(args=None, pretrained='/home/sdastani/projects/rrg-ebrahimi/sdastani/flownet2-pytorch/FlowNet2_checkpoint.pth.tar', save_flow=True)
+                flownet.cuda()
+                flow, image, loss = flownet(input1, input2)
+                image = transform(image.float())
+                seqlength.append(image)
+            length = torch.stack(seqlength, dim=0)
+            btch.append(length)
+        final = torch.stack(btch, dim=0)
+
+        final, target = final.to(device), target.to(device)
 
         features = []
-        for frame in data:
+        for frame in final:
             with torch.no_grad():
                 feature = cnn(frame.float())
             features.append(feature)
@@ -153,6 +201,13 @@ results = {
     "valid_times":  []
 }
 
+sys.path.insert(0, 'flownet2')
+
+from ops.resample2d import Resample2d
+from components.flownet2 import FlowNet2
+from components.flowlib import flow_to_image
+from tools.flownet_test import FlowModel 
+
 # train
 for epoch in range(config['parameter']['epochs']):
     train_loss, train_time = train(resnetmodel, rnn, train_loader, optimizer, criterion)
@@ -177,7 +232,7 @@ plt.legend()
 plt.savefig('train.png')
 
 # test
-test_loss, test_time, out, target = validate(resnetmodel, rnn, val_loader, criterion)
+test_loss, test_time, out, target = validate(resnetmodel, rnn, train_loader, criterion)
 
 # k-means
 cluster_ids_x, cluster_centers = kmeans(X=out, num_clusters=config['parameter']['num_classes'], distance='euclidean', device=device)
