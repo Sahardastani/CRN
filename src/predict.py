@@ -22,27 +22,27 @@ from models.rnn import VideoRNN
 from models.resnet_simclr import ResNetSimCLR
 from models.feature_extractor import FeatureExtractor
 
-from datasets.ucf101 import VideoDataset
+from datasets.ucf101 import VideoDataset, FrameDataset
 from __init__ import top_dir, data_dir, configs_dir
 
 MEAN = torch.tensor((0.485 * 255, 0.456 * 255, 0.406 * 255))
 STD = torch.tensor((0.229 * 255, 0.224 * 255, 0.225 * 255))
 
 # Set config and device
-config = yaml.load(open("./src/configs/config.yaml", "r"), Loader=yaml.FullLoader)
+config = yaml.load(open("/home/sdastani/projects/rrg-ebrahimi/sdastani/CRN/src/configs/config.yaml", "r"), Loader=yaml.FullLoader)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
 
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
 # Define the dataloader function
 def get_dataloader(root_dir, batch_size, sequence_length, transform):
 
     # get the dataset
-    dataset = VideoDataset(root_dir='/home/sdastani/scratch/ucf101/UCF101', seq_length = sequence_length, transform=transform)
+    dataset = VideoDataset(root_dir, sequence_length, transform)
     
     # split the dataset into train and test
     train_size = int(0.7 * len(dataset))
@@ -61,8 +61,6 @@ train_loader, val_loader = get_dataloader('/home/sdastani/scratch/ucf101/UCF101'
                                             config['parameter']['sequence_length'], 
                                             transform)
 
-# dataset = VideoDataset('/home/sdastani/scratch/uc', seq_length=10)#, transform=transform)
-# dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)
 
 # load the model from checkpoint
 model = ResNetSimCLR(base_model='resnet18', out_dim=128)
@@ -88,6 +86,7 @@ def train(cnn, rnn, dataloader, optimizer, criterion):
     start = time.time()
 
     for batch_idx, (data, target) in enumerate(dataloader):
+        start1 = time.time()
 
         # Create a dictionary that maps each unique element to a unique integer value
         unique_elements = list(set(target))
@@ -98,7 +97,6 @@ def train(cnn, rnn, dataloader, optimizer, criterion):
         btch = []
         for i, batch in enumerate(data):
             seqlength = []
-            # print(f'batch {i} is being processed ...')
             for j in range(batch.shape[0]):
                 cur_frame = data[0][j].permute(1,2,0)
                 pre_frame = data[0][j-1].permute(1,2,0)
@@ -131,7 +129,8 @@ def train(cnn, rnn, dataloader, optimizer, criterion):
         optimizer.step()
 
         train_loss += loss.item()
-
+        end1 = time.time()
+        print('train_loss:', train_loss, 'train_time', end1-start1, f'--------- {batch_idx}/{len(dataloader)}')
     end = time.time()
     train_loss /= len(dataloader)
     train_time = end - start
@@ -201,7 +200,13 @@ results = {
     "valid_times":  []
 }
 
-sys.path.insert(0, 'flownet2')
+# Get the current directory of predict.py
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Add the "flownet" directory to the module search path
+flownet_dir = os.path.join(current_dir, "../flownet2")
+sys.path.append(flownet_dir)
+
 
 from ops.resample2d import Resample2d
 from components.flownet2 import FlowNet2

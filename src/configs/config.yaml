@@ -1,11 +1,11 @@
 checkpoint:
-  simclr: ./checkpoints/checkpoint_0100.pth.tar
+  simclr: /home/sdastani/projects/rrg-ebrahimi/sdastani/CRN/checkpoints/checkpoint_0100.pth.tar
 
 parameter:
   sequence_length: 10
-  batch_size: 5
+  batch_size: 15
   input_size: 128
   hidden_size: 256
   num_layers: 2
   num_classes: 101
-  epochs: 5
+  epochs: 15
